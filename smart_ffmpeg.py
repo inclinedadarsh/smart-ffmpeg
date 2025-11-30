@@ -124,7 +124,18 @@ def run_ffmpeg_command(command: str):
         console.print(f"[bold red]Execution Error:[/bold red] {str(e)}")
 
 def main():
-    console.print(Panel.fit("[bold blue]Smart FFmpeg CLI[/bold blue] 🎬\n[italic]Powered by OpenRouter & Rich[/italic]"))
+    banner = r"""
+ [bold blue]_____                      _      ____________                          
+/  ___|                    | |     |  ___|  ___|                         
+\ `--. _ __ ___   __ _ _ __| |_    | |_  | |_ _ __ ___  _ __   ___  __ _ 
+ `--. \ '_ ` _ \ / _` | '__| __|   |  _| |  _| '_ ` _ \| '_ \ / _ \/ _` |
+/\__/ / | | | | | (_| | |  | |_    | |   | | | | | | | | |_) |  __/ (_| |
+\____/|_| |_| |_|\__,_|_|   \__|   \_|   \_| |_| |_| |_| .__/ \___|\__, |
+                                                       | |          __/ |
+                                                       |_|         |___/ [/bold blue]
+    """
+    console.print(banner)
+    console.print("[italic]AI-Powered FFmpeg Command Generator[/italic]\n")
     
     api_key = get_api_key()
     client = OpenAI(
