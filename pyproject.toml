@@ -12,3 +12,8 @@ dependencies = [
 
 [project.scripts]
 smart-ffmpeg = "smart_ffmpeg:main"
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.17.0",
+]
