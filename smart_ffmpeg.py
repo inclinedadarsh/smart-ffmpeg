@@ -270,8 +270,8 @@ def main():
     # Interactive mode
     while True:
         mode_str = "Always Allow" if config.always_allow else "Ask"
-        console.print(f"\n[dim]Current Mode: {mode_str} (Use /mode to toggle)[/dim]")
-        console.print("[bold yellow]What do you want to do?[/bold yellow] (or '/exit' to quit)")
+        console.print(f"\n[dim]Current Mode: {mode_str} (Type /help for options)[/dim]")
+        console.print("[bold yellow]What do you want to do?[/bold yellow]")
         
         user_input = Prompt.ask(">>")
         
@@ -281,6 +281,17 @@ def main():
         if user_input.strip().lower() == '/exit':
             console.print("[bold blue]Goodbye![/bold blue]")
             break
+
+        if user_input.strip().lower() == '/help':
+            console.print(Panel.fit(
+                "[bold cyan]Available Commands:[/bold cyan]\n\n"
+                "[bold green]/mode[/bold green]   - Toggle between 'Always Allow' and 'Ask' mode.\n"
+                "[bold green]/prompt[/bold green] - View or edit the custom system prompt.\n"
+                "[bold green]/exit[/bold green]   - Quit the application.\n"
+                "[bold green]/help[/bold green]   - Show this help message.",
+                title="Help", border_style="cyan"
+            ))
+            continue
         
         if user_input.strip() == '/mode':
             config.always_allow = not config.always_allow
