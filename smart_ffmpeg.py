@@ -80,6 +80,15 @@ class Config:
         self.data["custom_system_prompt"] = value
         self.save_config()
 
+    @property
+    def verbose(self) -> bool:
+        return self.data.get("verbose", False)
+
+    @verbose.setter
+    def verbose(self, value: bool):
+        self.data["verbose"] = value
+        self.save_config()
+
 
 config = Config()
 
@@ -167,8 +176,8 @@ def run_ffmpeg_command(command: str):
         ):
             for line in process.stdout:
                 # We can print the raw output or try to parse progress.
-                # For simplicity and "Rich" feel, let's print dimmed logs.
-                console.print(line.strip(), style="dim", highlight=False)
+                if config.verbose:
+                    console.print(line.strip(), highlight=False)
 
         return_code = process.wait()
 
@@ -321,10 +330,11 @@ def main():
             console.print(
                 Panel.fit(
                     "[bold cyan]Available Commands:[/bold cyan]\n\n"
-                    "[bold green]/mode[/bold green]   - Toggle between 'Always Allow' and 'Ask' mode.\n"
-                    "[bold green]/prompt[/bold green] - View or edit the custom system prompt.\n"
-                    "[bold green]/exit[/bold green]   - Quit the application.\n"
-                    "[bold green]/help[/bold green]   - Show this help message.",
+                    "[bold green]/mode[/bold green]    - Toggle between 'Always Allow' and 'Ask' mode.\n"
+                    "[bold green]/prompt[/bold green]  - View or edit the custom system prompt.\n"
+                    "[bold green]/verbose[/bold green] - Toggle verbose output (FFmpeg logs).\n"
+                    "[bold green]/exit[/bold green]    - Quit the application.\n"
+                    "[bold green]/help[/bold green]    - Show this help message.",
                     title="Help",
                     border_style="cyan",
                 )
@@ -335,6 +345,19 @@ def main():
             config.always_allow = not config.always_allow
             new_mode = "Always Allow" if config.always_allow else "Ask"
             console.print(f"[bold green]Mode switched to: {new_mode}[/bold green]")
+            continue
+
+        if user_input.strip() == "/verbose":
+            choice = questionary.select(
+                "Enable Verbose Mode (Show FFmpeg output)?",
+                choices=["True", "False"],
+                default="True" if config.verbose else "False",
+            ).ask()
+
+            config.verbose = choice == "True"
+            console.print(
+                f"[bold green]Verbose mode set to: {config.verbose}[/bold green]"
+            )
             continue
 
         if user_input.strip() == "/prompt":
