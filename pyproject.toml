@@ -16,5 +16,7 @@ smart-ffmpeg = "smart_ffmpeg:main"
 
 [dependency-groups]
 dev = [
+    "pre-commit>=4.3.0",
     "pyinstaller>=6.17.0",
+    "ruff>=0.14.7",
 ]
