@@ -39,7 +39,7 @@ class Config:
                     return json.load(f)
             except json.JSONDecodeError:
                 return {"always_allow": False}
-        return {"always_allow": False}
+        return {"always_allow": False, "custom_system_prompt": None}
 
     def save_config(self):
         with open(self.config_file, 'w') as f:
@@ -52,6 +52,15 @@ class Config:
     @always_allow.setter
     def always_allow(self, value: bool):
         self.data["always_allow"] = value
+        self.save_config()
+
+    @property
+    def custom_system_prompt(self) -> Optional[str]:
+        return self.data.get("custom_system_prompt")
+
+    @custom_system_prompt.setter
+    def custom_system_prompt(self, value: Optional[str]):
+        self.data["custom_system_prompt"] = value
         self.save_config()
 
 config = Config()
@@ -72,21 +81,24 @@ def get_ffmpeg_command(client: OpenAI, messages: List[Dict], model: str = None) 
     if model is None:
         model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
     
-    system_prompt = """
-You are an expert FFmpeg command generator. 
-Your task is to translate the user's natural language request into a valid, efficient FFmpeg command.
+    if config.custom_system_prompt:
+        system_prompt = config.custom_system_prompt
+    else:
+        system_prompt = """
+    You are an expert FFmpeg command generator. 
+    Your task is to translate the user's natural language request into a valid, efficient FFmpeg command.
 
-You must output your response in valid JSON format with the following structure:
-{
-    "command": "the full ffmpeg command here",
-    "explanation": "a brief explanation of what the command does"
-}
+    You must output your response in valid JSON format with the following structure:
+    {
+        "command": "the full ffmpeg command here",
+        "explanation": "a brief explanation of what the command does"
+    }
 
-- Ensure the command is safe and correct.
-- Do not include markdown formatting (like ```json) around the output, just the raw JSON string.
-- If the user's request is ambiguous, make a reasonable assumption and note it in the explanation.
-- Assume standard input/output filenames if none are provided (e.g., input.mp4, output.mp4), or placeholders like <input_file>.
-    """
+    - Ensure the command is safe and correct.
+    - Do not include markdown formatting (like ```json) around the output, just the raw JSON string.
+    - If the user's request is ambiguous, make a reasonable assumption and note it in the explanation.
+    - Assume standard input/output filenames if none are provided (e.g., input.mp4, output.mp4), or placeholders like <input_file>.
+        """
     
     conversation = [{"role": "system", "content": system_prompt}] + messages
 
@@ -271,6 +283,44 @@ def main():
             config.always_allow = not config.always_allow
             new_mode = "Always Allow" if config.always_allow else "Ask"
             console.print(f"[bold green]Mode switched to: {new_mode}[/bold green]")
+            continue
+        
+        if user_input.strip() == '/prompt':
+            while True:
+                prompt_choice = questionary.select(
+                    "Custom System Prompt Management:",
+                    choices=[
+                        "View Custom Prompt",
+                        "Set Custom Prompt",
+                        "Clear Custom Prompt",
+                        "Back"
+                    ]
+                ).ask()
+
+                if prompt_choice == "View Custom Prompt":
+                    if config.custom_system_prompt:
+                        console.print("\n[bold]Current Custom System Prompt:[/bold]")
+                        console.print(Panel(config.custom_system_prompt, border_style="blue"))
+                    else:
+                        console.print("[yellow]No custom system prompt set.[/yellow]")
+                elif prompt_choice == "Set Custom Prompt":
+                    new_prompt = questionary.text(
+                        "Enter your new custom system prompt (leave empty to cancel):",
+                        default=config.custom_system_prompt or ""
+                    ).ask()
+                    if new_prompt:
+                        config.custom_system_prompt = new_prompt
+                        console.print("[bold green]Custom system prompt updated![/bold green]")
+                    else:
+                        console.print("[yellow]Custom system prompt not changed.[/yellow]")
+                elif prompt_choice == "Clear Custom Prompt":
+                    if config.custom_system_prompt:
+                        config.custom_system_prompt = None
+                        console.print("[bold green]Custom system prompt cleared![/bold green]")
+                    else:
+                        console.print("[yellow]No custom system prompt to clear.[/yellow]")
+                elif prompt_choice == "Back":
+                    break
             continue
             
         process_request(client, user_input)
