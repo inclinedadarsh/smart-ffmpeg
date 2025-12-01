@@ -268,14 +268,14 @@ def main():
     while True:
         mode_str = "Always Allow" if config.always_allow else "Ask"
         console.print(f"\n[dim]Current Mode: {mode_str} (Use /mode to toggle)[/dim]")
-        console.print("[bold yellow]What do you want to do?[/bold yellow] (or 'exit' to quit)")
+        console.print("[bold yellow]What do you want to do?[/bold yellow] (or '/exit' to quit)")
         
         user_input = Prompt.ask(">>")
         
         if not user_input.strip():
             continue
 
-        if user_input.lower() in ('exit', 'quit', 'q'):
+        if user_input.strip().lower() == '/exit':
             console.print("[bold blue]Goodbye![/bold blue]")
             break
         
