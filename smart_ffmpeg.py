@@ -4,22 +4,57 @@ import sys
 import subprocess
 import shlex
 import json
-from typing import Optional
+from typing import Optional, List, Dict
+from pathlib import Path
 
 from rich.console import Console
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Prompt
 from rich.panel import Panel
 from rich.syntax import Syntax
-from rich.markdown import Markdown
 from rich.status import Status
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from dotenv import load_dotenv
 from openai import OpenAI
+import questionary
 
 # Load environment variables
 load_dotenv()
 
 console = Console()
+
+class Config:
+    def __init__(self):
+        self.config_dir = Path.home() / ".config" / "smart-ffmpeg"
+        self.config_file = self.config_dir / "config.json"
+        self.ensure_config_dir()
+        self.data = self.load_config()
+
+    def ensure_config_dir(self):
+        if not self.config_dir.exists():
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+
+    def load_config(self) -> Dict:
+        if self.config_file.exists():
+            try:
+                with open(self.config_file, 'r') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                return {"always_allow": False}
+        return {"always_allow": False}
+
+    def save_config(self):
+        with open(self.config_file, 'w') as f:
+            json.dump(self.data, f, indent=4)
+
+    @property
+    def always_allow(self) -> bool:
+        return self.data.get("always_allow", False)
+
+    @always_allow.setter
+    def always_allow(self, value: bool):
+        self.data["always_allow"] = value
+        self.save_config()
+
+config = Config()
 
 def get_api_key() -> str:
     api_key = os.getenv("OPENROUTER_API_KEY")
@@ -29,9 +64,9 @@ def get_api_key() -> str:
         sys.exit(1)
     return api_key
 
-def get_ffmpeg_command(client: OpenAI, prompt: str, model: str = None) -> dict:
+def get_ffmpeg_command(client: OpenAI, messages: List[Dict], model: str = None) -> dict:
     """
-    Generates an FFmpeg command from a natural language prompt using OpenRouter.
+    Generates an FFmpeg command from a conversation history using OpenRouter.
     Returns a dictionary with 'command' and 'explanation'.
     """
     if model is None:
@@ -52,15 +87,14 @@ You must output your response in valid JSON format with the following structure:
 - If the user's request is ambiguous, make a reasonable assumption and note it in the explanation.
 - Assume standard input/output filenames if none are provided (e.g., input.mp4, output.mp4), or placeholders like <input_file>.
     """
+    
+    conversation = [{"role": "system", "content": system_prompt}] + messages
 
     try:
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"}, # Force JSON if supported, otherwise system prompt handles it
+            messages=conversation,
+            response_format={"type": "json_object"}, 
         )
         
         content = response.choices[0].message.content.strip()
@@ -91,7 +125,7 @@ def run_ffmpeg_command(command: str):
         args = shlex.split(command)
         
         # Check if ffmpeg is installed
-        if args[0] != 'ffmpeg':
+        if args and args[0] != 'ffmpeg':
              # In case the model didn't start with ffmpeg or user aliased it, 
              # but usually we expect 'ffmpeg'. Let's trust the model but verify binary exists.
              pass
@@ -123,6 +157,75 @@ def run_ffmpeg_command(command: str):
     except Exception as e:
         console.print(f"[bold red]Execution Error:[/bold red] {str(e)}")
 
+def process_request(client: OpenAI, initial_prompt: str):
+    messages = [{"role": "user", "content": initial_prompt}]
+    
+    while True:
+        with console.status("[bold cyan]Generating command...[/bold cyan]", spinner="arc"):
+            result = get_ffmpeg_command(client, messages)
+            
+        command = result.get("command")
+        explanation = result.get("explanation")
+        
+        console.print("\n[bold]Generated Command:[/bold]")
+        console.print(Syntax(command, "bash", theme="monokai", word_wrap=True))
+        console.print(Panel(explanation, title="Explanation", title_align="left", border_style="green"))
+        
+        # Add assistant response to history for context if user wants changes
+        messages.append({"role": "assistant", "content": json.dumps(result)})
+
+        if config.always_allow:
+            console.print("[dim]Running automatically due to 'Always Allow' preference. Use /mode to change.[/dim]")
+            run_ffmpeg_command(command)
+            break
+        
+        # Interactive Menu
+        # Ensure we are in a terminal that supports this, or fallback?
+        # Questionary handles this reasonably well.
+        choice = questionary.select(
+            "What would you like to do?",
+            choices=[
+                "Allow (Run command)",
+                "Always Allow (Save preference & Run)",
+                "Make Changes (Refine command)",
+                "Reject (Cancel)"
+            ],
+            use_indicator=True,
+            style=questionary.Style([
+                ('qmark', 'fg:#E91E63 bold'),       
+                ('question', 'bold'),               
+                ('answer', 'fg:#2196f3 bold'),      
+                ('pointer', 'fg:#673ab7 bold'),     
+                ('highlighted', 'fg:#673ab7 bold'), 
+                ('selected', 'fg:#cc5454'),         
+                ('separator', 'fg:#cc5454'),        
+                ('instruction', ''),                
+                ('text', ''),                       
+                ('disabled', 'fg:#858585 italic')   
+            ])
+        ).ask()
+
+        if choice == "Allow (Run command)":
+            run_ffmpeg_command(command)
+            break
+        elif choice == "Always Allow (Save preference & Run)":
+            config.always_allow = True
+            console.print("[bold green]Preference saved![/bold green] Future commands will run automatically.")
+            run_ffmpeg_command(command)
+            break
+        elif choice == "Make Changes (Refine command)":
+            refinement = questionary.text("Describe the changes needed:").ask()
+            if refinement:
+                messages.append({"role": "user", "content": refinement})
+                continue # Loop back to generate new command
+            else:
+                console.print("[yellow]No changes entered. Retaining previous command.[/yellow]")
+                # Could just loop back with no change or break. Let's loop back.
+                continue
+        else: # Reject
+            console.print("[red]Command rejected.[/red]")
+            break
+
 def main():
     banner = r"""
  [bold blue]_____                      _      ____________                          
@@ -151,31 +254,26 @@ def main():
 
     # Interactive mode
     while True:
-        console.print("\n[bold yellow]What do you want to do?[/bold yellow] (or 'exit' to quit)")
+        mode_str = "Always Allow" if config.always_allow else "Ask"
+        console.print(f"\n[dim]Current Mode: {mode_str} (Use /mode to toggle)[/dim]")
+        console.print("[bold yellow]What do you want to do?[/bold yellow] (or 'exit' to quit)")
+        
         user_input = Prompt.ask(">>")
         
+        if not user_input.strip():
+            continue
+
         if user_input.lower() in ('exit', 'quit', 'q'):
             console.print("[bold blue]Goodbye![/bold blue]")
             break
         
-        if not user_input.strip():
+        if user_input.strip() == '/mode':
+            config.always_allow = not config.always_allow
+            new_mode = "Always Allow" if config.always_allow else "Ask"
+            console.print(f"[bold green]Mode switched to: {new_mode}[/bold green]")
             continue
             
         process_request(client, user_input)
-
-def process_request(client: OpenAI, prompt: str):
-    with console.status("[bold cyan]Generating command...[/bold cyan]", spinner="arc"):
-        result = get_ffmpeg_command(client, prompt)
-        
-    command = result.get("command")
-    explanation = result.get("explanation")
-    
-    console.print("\n[bold]Generated Command:[/bold]")
-    console.print(Syntax(command, "bash", theme="monokai", word_wrap=True))
-    console.print(Panel(explanation, title="Explanation", title_align="left", border_style="green"))
-    
-    if Confirm.ask("Do you want to run this command?", default=True):
-        run_ffmpeg_command(command)
 
 if __name__ == "__main__":
     main()
