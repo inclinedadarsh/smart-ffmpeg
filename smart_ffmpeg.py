@@ -15,11 +15,28 @@ from rich.status import Status
 from dotenv import load_dotenv
 from openai import OpenAI
 import questionary
+import tempfile
 
 # Load environment variables
 load_dotenv()
 
 console = Console()
+
+DEFAULT_SYSTEM_PROMPT = """
+You are an expert FFmpeg command generator. 
+Your task is to translate the user's natural language request into a valid, efficient FFmpeg command.
+
+You must output your response in valid JSON format with the following structure:
+{
+    "command": "the full ffmpeg command here",
+    "explanation": "a brief explanation of what the command does"
+}
+
+- Ensure the command is safe and correct.
+- Do not include markdown formatting (like ```json) around the output, just the raw JSON string.
+- If the user's request is ambiguous, make a reasonable assumption and note it in the explanation.
+- Assume standard input/output filenames if none are provided (e.g., input.mp4, output.mp4), or placeholders like <input_file>.
+""".strip()
 
 class Config:
     def __init__(self):
@@ -84,21 +101,7 @@ def get_ffmpeg_command(client: OpenAI, messages: List[Dict], model: str = None) 
     if config.custom_system_prompt:
         system_prompt = config.custom_system_prompt
     else:
-        system_prompt = """
-    You are an expert FFmpeg command generator. 
-    Your task is to translate the user's natural language request into a valid, efficient FFmpeg command.
-
-    You must output your response in valid JSON format with the following structure:
-    {
-        "command": "the full ffmpeg command here",
-        "explanation": "a brief explanation of what the command does"
-    }
-
-    - Ensure the command is safe and correct.
-    - Do not include markdown formatting (like ```json) around the output, just the raw JSON string.
-    - If the user's request is ambiguous, make a reasonable assumption and note it in the explanation.
-    - Assume standard input/output filenames if none are provided (e.g., input.mp4, output.mp4), or placeholders like <input_file>.
-        """
+        system_prompt = DEFAULT_SYSTEM_PROMPT
     
     conversation = [{"role": "system", "content": system_prompt}] + messages
 
@@ -290,35 +293,59 @@ def main():
                 prompt_choice = questionary.select(
                     "Custom System Prompt Management:",
                     choices=[
-                        "View Custom Prompt",
-                        "Set Custom Prompt",
-                        "Clear Custom Prompt",
+                        "View Current Prompt",
+                        "Edit Prompt (Open Editor)",
+                        "Reset to Default",
                         "Back"
                     ]
                 ).ask()
 
-                if prompt_choice == "View Custom Prompt":
+                if prompt_choice == "View Current Prompt":
+                    current_prompt = config.custom_system_prompt if config.custom_system_prompt else DEFAULT_SYSTEM_PROMPT
+                    is_custom = "(Custom)" if config.custom_system_prompt else "(Default)"
+                    console.print(f"\n[bold]Current System Prompt {is_custom}:[/bold]")
+                    console.print(Panel(current_prompt, border_style="blue"))
+                
+                elif prompt_choice == "Edit Prompt (Open Editor)":
+                    # Start with existing custom prompt or the default one
+                    initial_content = config.custom_system_prompt if config.custom_system_prompt else DEFAULT_SYSTEM_PROMPT
+                    
+                    editor = os.environ.get('EDITOR', 'nano')
+                    
+                    with tempfile.NamedTemporaryFile(mode='w+', suffix=".txt", delete=False) as tf:
+                        tf.write(initial_content)
+                        tf_path = tf.name
+                    
+                    try:
+                        console.print(f"[dim]Opening editor ({editor})...[/dim]")
+                        cmd = editor.split() + [tf_path] if " " in editor else [editor, tf_path]
+                        subprocess.call(cmd)
+                        
+                        with open(tf_path, 'r') as tf:
+                            new_content = tf.read().strip()
+                        
+                        if new_content and new_content != initial_content:
+                            config.custom_system_prompt = new_content
+                            console.print("[bold green]System prompt updated![/bold green]")
+                        elif not new_content:
+                             console.print("[yellow]Prompt was empty. No changes saved.[/yellow]")
+                        else:
+                            console.print("[yellow]No changes made.[/yellow]")
+
+                    except Exception as e:
+                        console.print(f"[bold red]Error opening editor:[/bold red] {str(e)}")
+                    finally:
+                        if os.path.exists(tf_path):
+                            os.remove(tf_path)
+                            
+                elif prompt_choice == "Reset to Default":
                     if config.custom_system_prompt:
-                        console.print("\n[bold]Current Custom System Prompt:[/bold]")
-                        console.print(Panel(config.custom_system_prompt, border_style="blue"))
+                        if questionary.confirm("Are you sure you want to clear the custom prompt and revert to default?").ask():
+                            config.custom_system_prompt = None
+                            console.print("[bold green]Reverted to default system prompt.[/bold green]")
                     else:
-                        console.print("[yellow]No custom system prompt set.[/yellow]")
-                elif prompt_choice == "Set Custom Prompt":
-                    new_prompt = questionary.text(
-                        "Enter your new custom system prompt (leave empty to cancel):",
-                        default=config.custom_system_prompt or ""
-                    ).ask()
-                    if new_prompt:
-                        config.custom_system_prompt = new_prompt
-                        console.print("[bold green]Custom system prompt updated![/bold green]")
-                    else:
-                        console.print("[yellow]Custom system prompt not changed.[/yellow]")
-                elif prompt_choice == "Clear Custom Prompt":
-                    if config.custom_system_prompt:
-                        config.custom_system_prompt = None
-                        console.print("[bold green]Custom system prompt cleared![/bold green]")
-                    else:
-                        console.print("[yellow]No custom system prompt to clear.[/yellow]")
+                        console.print("[yellow]Already using default system prompt.[/yellow]")
+                        
                 elif prompt_choice == "Back":
                     break
             continue
