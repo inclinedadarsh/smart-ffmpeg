@@ -89,19 +89,68 @@ class Config:
         self.data["verbose"] = value
         self.save_config()
 
+    @property
+    def model(self) -> Optional[str]:
+        return self.data.get("model")
+
+    @model.setter
+    def model(self, value: str):
+        self.data["model"] = value
+        self.save_config()
+
+    @property
+    def api_key(self) -> Optional[str]:
+        return self.data.get("api_key")
+
+    @api_key.setter
+    def api_key(self, value: str):
+        self.data["api_key"] = value
+        self.save_config()
+
 
 config = Config()
 
 
 def get_api_key() -> str:
+    if config.api_key:
+        return config.api_key
+
     api_key = os.getenv("OPENROUTER_API_KEY")
-    if not api_key:
-        console.print(
-            "[bold red]Error:[/bold red] OPENROUTER_API_KEY not found in environment variables."
-        )
-        console.print("Please set it in a .env file or export it in your shell.")
-        sys.exit(1)
-    return api_key
+    if api_key:
+        return api_key
+
+    console.print("[yellow]No API key found.[/yellow]")
+    api_key = questionary.password("Please enter your OpenRouter API Key:").ask()
+
+    if api_key:
+        config.api_key = api_key
+        console.print("[green]API Key saved to config.[/green]")
+        return api_key
+
+    console.print("[bold red]Error:[/bold red] API Key is required.")
+    sys.exit(1)
+
+
+def ensure_model_name() -> str:
+    if config.model:
+        return config.model
+
+    model = os.getenv("OPENROUTER_MODEL")
+    if model:
+        return model
+
+    console.print("[yellow]No model configured.[/yellow]")
+    model = questionary.text(
+        "Please enter the Model Name (e.g. google/gemini-2.0-flash-001):"
+    ).ask()
+
+    if model:
+        config.model = model
+        console.print("[green]Model name saved to config.[/green]")
+        return model
+
+    console.print("[bold red]Error:[/bold red] Model name is required.")
+    sys.exit(1)
 
 
 def get_ffmpeg_command(client: OpenAI, messages: List[Dict], model: str = None) -> dict:
@@ -110,7 +159,10 @@ def get_ffmpeg_command(client: OpenAI, messages: List[Dict], model: str = None) 
     Returns a dictionary with 'command' and 'explanation'.
     """
     if model is None:
-        model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
+        model = config.model or os.getenv("OPENROUTER_MODEL")
+
+    if not model:
+        raise ValueError("Model name is not configured.")
 
     if config.custom_system_prompt:
         system_prompt = config.custom_system_prompt
@@ -300,6 +352,7 @@ def main():
     console.print("[italic]AI-Powered FFmpeg Command Generator[/italic]\n")
 
     api_key = get_api_key()
+    ensure_model_name()
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
@@ -332,6 +385,8 @@ def main():
                     "[bold cyan]Available Commands:[/bold cyan]\n\n"
                     "[bold green]/mode[/bold green]    - Toggle between 'Always Allow' and 'Ask' mode.\n"
                     "[bold green]/prompt[/bold green]  - View or edit the custom system prompt.\n"
+                    "[bold green]/model[/bold green]   - View or edit the model name.\n"
+                    "[bold green]/api-key[/bold green] - Update the API key.\n"
                     "[bold green]/verbose[/bold green] - Toggle verbose output (FFmpeg logs).\n"
                     "[bold green]/exit[/bold green]    - Quit the application.\n"
                     "[bold green]/help[/bold green]    - Show this help message.",
@@ -448,6 +503,24 @@ def main():
 
                 elif prompt_choice == "Back":
                     break
+            continue
+
+        if user_input.strip() == "/model":
+            current_model = config.model or os.getenv("OPENROUTER_MODEL") or ""
+            new_model = questionary.text(
+                "Enter new model name:", default=current_model
+            ).ask()
+            if new_model:
+                config.model = new_model
+                console.print(f"[bold green]Model updated to: {new_model}[/bold green]")
+            continue
+
+        if user_input.strip() == "/api-key":
+            new_key = questionary.password("Enter new API key:").ask()
+            if new_key:
+                config.api_key = new_key
+                client.api_key = new_key
+                console.print("[bold green]API Key updated![/bold green]")
             continue
 
         process_request(client, user_input)
